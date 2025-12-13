@@ -46,7 +46,7 @@ func (c *Client) InitSchema(ctx context.Context) error {
 			capacity_kwh FLOAT NOT NULL,
 			power_kw FLOAT NOT NULL,
 			chemistry VARCHAR(100) NOT NULL,
-			embedding vector(1536),
+			embedding vector(1536),  -- Dimension for OpenAI text-embedding-3-small model
 			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 			UNIQUE(make, model, year)
 		)`,

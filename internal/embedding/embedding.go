@@ -10,7 +10,9 @@ import (
 
 const (
 	openaiEmbeddingURL = "https://api.openai.com/v1/embeddings"
-	embeddingModel     = "text-embedding-3-small"
+	// embeddingModel is the OpenAI model used for generating embeddings
+	// This model produces 1536-dimensional vectors
+	embeddingModel = "text-embedding-3-small"
 )
 
 // Service handles text-to-vector embedding operations

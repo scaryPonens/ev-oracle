@@ -122,7 +122,7 @@ func parseEVSpecs(text, make, model string, year int) (*models.EVSpec, error) {
 		Make:       make,
 		Model:      model,
 		Year:       year,
-		Confidence: 0.5, // LLM responses get lower confidence
+		Confidence: models.LLMConfidenceScore,
 		Source:     "llm",
 	}
 

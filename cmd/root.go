@@ -98,7 +98,7 @@ func runQuery(cmd *cobra.Command, args []string) error {
 	}
 
 	// Check if we have results with sufficient confidence
-	if len(results) > 0 && results[0].Confidence >= 0.8 {
+	if len(results) > 0 && results[0].Confidence >= models.ConfidenceThreshold {
 		return outputSpec(&results[0])
 	}
 
