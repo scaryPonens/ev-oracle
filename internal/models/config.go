@@ -18,19 +18,19 @@ type ConfigOption func(*Config) error
 // NewConfig creates a new Config with the given options
 func NewConfig(opts ...ConfigOption) (*Config, error) {
 	cfg := &Config{}
-	
+
 	// Apply default options (load from environment)
 	if err := WithEnvDefaults()(cfg); err != nil {
 		return nil, err
 	}
-	
+
 	// Apply user-provided options
 	for _, opt := range opts {
 		if err := opt(cfg); err != nil {
 			return nil, err
 		}
 	}
-	
+
 	// Validate required fields
 	if cfg.DatabaseURL == "" {
 		return nil, fmt.Errorf("NEON_DATABASE_URL is required")
@@ -41,7 +41,7 @@ func NewConfig(opts ...ConfigOption) (*Config, error) {
 	if cfg.AnthropicAPIKey == "" {
 		return nil, fmt.Errorf("ANTHROPIC_API_KEY is required")
 	}
-	
+
 	return cfg, nil
 }
 

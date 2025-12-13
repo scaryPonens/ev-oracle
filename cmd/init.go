@@ -45,6 +45,6 @@ func runInit(cmd *cobra.Command, args []string) error {
 
 	fmt.Println("Database schema initialized successfully!")
 	fmt.Println("You can now use 'ev-oracle' to query EV specifications.")
-	
+
 	return nil
 }
