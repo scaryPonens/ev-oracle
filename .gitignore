@@ -27,6 +27,9 @@ go.work.sum
 # env file
 .env
 
+# Binary
+ev-oracle
+
 # Editor/IDE
 # .idea/
 # .vscode/
