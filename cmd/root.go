@@ -82,7 +82,12 @@ func runQuery(cmd *cobra.Command, args []string) error {
 	}
 
 	// Initialize embedding service
-	embeddingSvc := embedding.New(cfg.OpenAIAPIKey)
+	embeddingSvc := embedding.NewWithProvider(
+		embedding.ProviderType(cfg.EmbeddingProvider),
+		cfg.OpenAIAPIKey,
+		cfg.OllamaURL,
+		cfg.OllamaModel,
+	)
 
 	// Build query text and get embedding
 	queryText := embedding.BuildQueryText(make, model, year)

@@ -66,7 +66,12 @@ func runAdd(cmd *cobra.Command, args []string) error {
 	defer dbClient.Close()
 
 	// Initialize embedding service
-	embeddingSvc := embedding.New(cfg.OpenAIAPIKey)
+	embeddingSvc := embedding.NewWithProvider(
+		embedding.ProviderType(cfg.EmbeddingProvider),
+		cfg.OpenAIAPIKey,
+		cfg.OllamaURL,
+		cfg.OllamaModel,
+	)
 
 	// Create the EV spec
 	spec := &models.EVSpec{

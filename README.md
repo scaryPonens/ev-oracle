@@ -17,7 +17,12 @@ The project follows a clean architecture pattern:
 ```
 ev-oracle/
 ├── cmd/                    # CLI commands
-│   └── root.go            # Main query command
+│   ├── root.go            # Main query command
+│   ├── init.go            # Database initialization
+│   └── migrate.go         # Migration commands
+├── migrations/            # Database migration files
+│   ├── 000001_init_schema.up.sql
+│   └── 000001_init_schema.down.sql
 ├── internal/
 │   ├── db/                # Database layer (pgx/v5, pgvector)
 │   ├── embedding/         # OpenAI embeddings service
@@ -56,32 +61,114 @@ The application uses environment variables for configuration:
 | Variable | Description | Required |
 |----------|-------------|----------|
 | `NEON_DATABASE_URL` | PostgreSQL connection string (with pgvector) | Yes |
-| `OPENAI_API_KEY` | OpenAI API key for embeddings | Yes |
+| `EMBEDDING_PROVIDER` | Embedding provider: `openai` or `ollama` (default: `openai`) | No |
+| `OPENAI_API_KEY` | OpenAI API key for embeddings (required if using OpenAI) | Conditional |
+| `OLLAMA_URL` | Ollama API URL (default: `http://localhost:11434`) | No |
+| `OLLAMA_MODEL` | Ollama embedding model (default: `nomic-embed-text`) | No |
 | `ANTHROPIC_API_KEY` | Anthropic API key for Claude fallback | Yes |
 
 ### Example .env file
 
+**Using OpenAI (default):**
 ```bash
 NEON_DATABASE_URL=postgresql://user:password@host/database?sslmode=require
+EMBEDDING_PROVIDER=openai
 OPENAI_API_KEY=sk-...
 ANTHROPIC_API_KEY=sk-ant-...
 ```
 
-Load environment variables:
-
+**Using Ollama:**
 ```bash
-export $(cat .env | xargs)
+NEON_DATABASE_URL=postgresql://user:password@host/database?sslmode=require
+EMBEDDING_PROVIDER=ollama
+OLLAMA_URL=http://localhost:11434
+OLLAMA_MODEL=nomic-embed-text
+ANTHROPIC_API_KEY=sk-ant-...
+```
+
+The application automatically loads the `.env` file if it exists. You don't need to manually export the variables.
+
+**Note:** The `.env` file is gitignored by default to keep your secrets safe.
+
+### Using Ollama for Embeddings
+
+To use Ollama instead of OpenAI for embeddings:
+
+1. **Install Ollama**: Download from [ollama.com](https://ollama.com)
+
+2. **Pull an embedding model**:
+   ```bash
+   ollama pull nomic-embed-text
+   ```
+
+3. **Start Ollama** (if not running as a service):
+   ```bash
+   ollama serve
+   ```
+
+4. **Configure your `.env` file**:
+   ```bash
+   EMBEDDING_PROVIDER=ollama
+   OLLAMA_URL=http://localhost:11434
+   OLLAMA_MODEL=nomic-embed-text
+   ```
+
+**Important Note:** The default database schema expects 1536-dimensional vectors (OpenAI's `text-embedding-3-small`). Ollama's `nomic-embed-text` produces 768-dimensional vectors. If you want to use Ollama, you'll need to:
+
+- Create a migration to change the embedding dimension in the database schema, OR
+- Use an Ollama model that produces 1536 dimensions (if available)
+
+To create a migration for Ollama's 768 dimensions:
+```bash
+# Create a new migration file
+# migrations/000002_update_embedding_dimension.up.sql
+ALTER TABLE ev_specs ALTER COLUMN embedding TYPE vector(768);
+DROP INDEX IF EXISTS ev_specs_embedding_idx;
+CREATE INDEX ev_specs_embedding_idx ON ev_specs 
+ USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
 ```
 
 ## Database Setup
 
-The application will automatically create the necessary schema on first use. However, you need to ensure the pgvector extension is available:
+### Initial Setup
 
-```sql
-CREATE EXTENSION IF NOT EXISTS vector;
+Initialize the database schema by running:
+
+```bash
+ev-oracle init
 ```
 
+This will run all pending migrations to set up the necessary tables and indexes. The pgvector extension will be automatically enabled.
+
 For Neon databases, pgvector is typically pre-installed.
+
+### Migrations
+
+The project uses [golang-migrate](https://github.com/golang-migrate/migrate) for database schema management. Migration files are stored in the `migrations/` directory.
+
+**Run all pending migrations:**
+```bash
+ev-oracle migrate up
+```
+
+**Roll back the last migration:**
+```bash
+ev-oracle migrate down
+```
+
+**Run a specific number of migrations:**
+```bash
+ev-oracle migrate --steps 2  # Run 2 migrations forward
+ev-oracle migrate --steps -1 # Roll back 1 migration
+```
+
+### Creating New Migrations
+
+To create a new migration, add files to the `migrations/` directory following the naming pattern:
+- `00000N_description.up.sql` - Migration to apply
+- `00000N_description.down.sql` - Migration to rollback
+
+The migration number should be sequential and unique.
 
 ## Usage
 
@@ -142,7 +229,10 @@ ev-oracle --help
 ### Project Structure
 
 - **cmd/root.go**: Main CLI command implementation
-- **internal/db/**: Database operations using pgx/v5 and pgvector
+- **cmd/init.go**: Database initialization command
+- **cmd/migrate.go**: Database migration commands
+- **migrations/**: SQL migration files (up/down)
+- **internal/db/**: Database operations using pgx/v5 and pgvector with migration support
 - **internal/embedding/**: OpenAI embeddings integration
 - **internal/llm/**: Claude API integration for fallback queries
 - **internal/models/**: Data models and configuration using functional options pattern
@@ -171,5 +261,6 @@ See [LICENSE](LICENSE) file for details.
 
 - Built with [Cobra](https://github.com/spf13/cobra) for CLI
 - Uses [pgx](https://github.com/jackc/pgx) for PostgreSQL connectivity
+- Database migrations powered by [golang-migrate](https://github.com/golang-migrate/migrate)
 - Powered by [OpenAI](https://openai.com) embeddings
 - Falls back to [Anthropic Claude](https://www.anthropic.com) for intelligent responses

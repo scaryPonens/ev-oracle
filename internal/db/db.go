@@ -3,15 +3,22 @@ package db
 import (
 	"context"
 	"fmt"
+	"path/filepath"
+	"strings"
 
+	"github.com/golang-migrate/migrate/v4"
+	_ "github.com/golang-migrate/migrate/v4/database/postgres"
+	_ "github.com/golang-migrate/migrate/v4/source/file"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	_ "github.com/lib/pq" // PostgreSQL driver for golang-migrate
 	"github.com/scaryPonens/ev-oracle/internal/models"
 )
 
 // Client represents a database client
 type Client struct {
-	pool *pgxpool.Pool
+	pool        *pgxpool.Pool
+	databaseURL string
 }
 
 // New creates a new database client
@@ -26,7 +33,10 @@ func New(ctx context.Context, databaseURL string) (*Client, error) {
 		return nil, fmt.Errorf("failed to ping database: %w", err)
 	}
 
-	return &Client{pool: pool}, nil
+	return &Client{
+		pool:        pool,
+		databaseURL: databaseURL,
+	}, nil
 }
 
 // Close closes the database connection pool
@@ -34,40 +44,89 @@ func (c *Client) Close() {
 	c.pool.Close()
 }
 
-// InitSchema initializes the database schema with pgvector extension
+// InitSchema initializes the database schema by running all pending migrations
+// This is a convenience method that calls MigrateUp
 func (c *Client) InitSchema(ctx context.Context) error {
-	queries := []string{
-		`CREATE EXTENSION IF NOT EXISTS vector`,
-		`CREATE TABLE IF NOT EXISTS ev_specs (
-			id SERIAL PRIMARY KEY,
-			make VARCHAR(100) NOT NULL,
-			model VARCHAR(100) NOT NULL,
-			year INTEGER NOT NULL,
-			capacity_kwh FLOAT NOT NULL,
-			power_kw FLOAT NOT NULL,
-			chemistry VARCHAR(100) NOT NULL,
-			embedding vector(1536),  -- Dimension for OpenAI text-embedding-3-small model
-			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-			UNIQUE(make, model, year)
-		)`,
-		// IVFFlat index for vector similarity search
-		// lists = 100 is a good default for small to medium datasets (up to 10,000 rows)
-		// For larger datasets, consider using sqrt(rows) for optimal performance
-		`CREATE INDEX IF NOT EXISTS ev_specs_embedding_idx ON ev_specs 
-		 USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100)`,
-	}
+	return c.MigrateUp(ctx)
+}
 
-	for _, query := range queries {
-		if _, err := c.pool.Exec(ctx, query); err != nil {
-			return fmt.Errorf("failed to execute query: %w", err)
-		}
+// MigrateUp runs all pending migrations
+func (c *Client) MigrateUp(ctx context.Context) error {
+	m, err := c.getMigrateInstance()
+	if err != nil {
+		return fmt.Errorf("failed to create migrate instance: %w", err)
+	}
+	defer m.Close()
+
+	if err := m.Up(); err != nil && err != migrate.ErrNoChange {
+		return fmt.Errorf("failed to run migrations: %w", err)
 	}
 
 	return nil
 }
 
+// MigrateDown rolls back the last migration
+func (c *Client) MigrateDown(ctx context.Context) error {
+	m, err := c.getMigrateInstance()
+	if err != nil {
+		return fmt.Errorf("failed to create migrate instance: %w", err)
+	}
+	defer m.Close()
+
+	if err := m.Down(); err != nil && err != migrate.ErrNoChange {
+		return fmt.Errorf("failed to rollback migration: %w", err)
+	}
+
+	return nil
+}
+
+// MigrateSteps runs n migrations (positive for up, negative for down)
+func (c *Client) MigrateSteps(ctx context.Context, n int) error {
+	m, err := c.getMigrateInstance()
+	if err != nil {
+		return fmt.Errorf("failed to create migrate instance: %w", err)
+	}
+	defer m.Close()
+
+	if err := m.Steps(n); err != nil && err != migrate.ErrNoChange {
+		return fmt.Errorf("failed to run migration steps: %w", err)
+	}
+
+	return nil
+}
+
+// getMigrateInstance creates a migrate instance for the database
+func (c *Client) getMigrateInstance() (*migrate.Migrate, error) {
+	// Get migrations directory path (relative to project root)
+	migrationsPath, err := filepath.Abs("migrations")
+	if err != nil {
+		return nil, fmt.Errorf("failed to get migrations path: %w", err)
+	}
+
+	// Use the database URL directly
+	// golang-migrate accepts both postgres:// and postgresql:// formats
+	dbURL := c.databaseURL
+
+	m, err := migrate.New(
+		fmt.Sprintf("file://%s", migrationsPath),
+		dbURL,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create migrate instance: %w", err)
+	}
+
+	return m, nil
+}
+
 // SimilaritySearch performs a vector similarity search
 func (c *Client) SimilaritySearch(ctx context.Context, embedding []float32, limit int) ([]models.EVSpec, error) {
+	// Format embedding as a string in pgvector format: [1.0,2.0,3.0]
+	embeddingStrs := make([]string, len(embedding))
+	for i, v := range embedding {
+		embeddingStrs[i] = fmt.Sprintf("%g", v)
+	}
+	embeddingStr := "[" + strings.Join(embeddingStrs, ",") + "]"
+
 	query := `
 		SELECT 
 			make, 
@@ -83,7 +142,7 @@ func (c *Client) SimilaritySearch(ctx context.Context, embedding []float32, limi
 		LIMIT $2
 	`
 
-	rows, err := c.pool.Query(ctx, query, embedding, limit)
+	rows, err := c.pool.Query(ctx, query, embeddingStr, limit)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query database: %w", err)
 	}
@@ -117,9 +176,16 @@ func (c *Client) SimilaritySearch(ctx context.Context, embedding []float32, limi
 
 // InsertEVSpec inserts a new EV specification with its embedding
 func (c *Client) InsertEVSpec(ctx context.Context, spec *models.EVSpec, embedding []float32) error {
+	// Format embedding as a string in pgvector format: [1.0,2.0,3.0]
+	embeddingStrs := make([]string, len(embedding))
+	for i, v := range embedding {
+		embeddingStrs[i] = fmt.Sprintf("%g", v)
+	}
+	embeddingStr := "[" + strings.Join(embeddingStrs, ",") + "]"
+
 	query := `
 		INSERT INTO ev_specs (make, model, year, capacity_kwh, power_kw, chemistry, embedding)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		VALUES ($1, $2, $3, $4, $5, $6, $7::vector)
 		ON CONFLICT (make, model, year) 
 		DO UPDATE SET 
 			capacity_kwh = EXCLUDED.capacity_kwh,
@@ -135,7 +201,7 @@ func (c *Client) InsertEVSpec(ctx context.Context, spec *models.EVSpec, embeddin
 		spec.Capacity,
 		spec.Power,
 		spec.Chemistry,
-		embedding,
+		embeddingStr,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to insert spec: %w", err)
