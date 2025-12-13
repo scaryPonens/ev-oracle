@@ -50,6 +50,9 @@ func (c *Client) InitSchema(ctx context.Context) error {
 			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 			UNIQUE(make, model, year)
 		)`,
+		// IVFFlat index for vector similarity search
+		// lists = 100 is a good default for small to medium datasets (up to 10,000 rows)
+		// For larger datasets, consider using sqrt(rows) for optimal performance
 		`CREATE INDEX IF NOT EXISTS ev_specs_embedding_idx ON ev_specs 
 		 USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100)`,
 	}
