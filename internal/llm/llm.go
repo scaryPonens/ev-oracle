@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"regexp"
 	"strconv"
+	"strings"
 
 	"github.com/scaryPonens/ev-oracle/internal/models"
 )
@@ -15,6 +16,13 @@ import (
 const (
 	anthropicAPIURL = "https://api.anthropic.com/v1/messages"
 	claudeModel     = "claude-3-5-sonnet-20241022"
+)
+
+// Compile regular expressions once at package initialization
+var (
+	capacityRe  = regexp.MustCompile(`(?i)capacity:\s*([0-9.]+)\s*kWh`)
+	powerRe     = regexp.MustCompile(`(?i)power:\s*([0-9.]+)\s*kW`)
+	chemistryRe = regexp.MustCompile(`(?i)chemistry:\s*([^\n]+)`)
 )
 
 // Service handles LLM operations for fallback queries
@@ -126,26 +134,23 @@ func parseEVSpecs(text, make, model string, year int) (*models.EVSpec, error) {
 		Source:     "llm",
 	}
 
-	// Extract capacity
-	capacityRe := regexp.MustCompile(`(?i)capacity:\s*([0-9.]+)\s*kWh`)
+	// Extract capacity using pre-compiled regex
 	if matches := capacityRe.FindStringSubmatch(text); len(matches) > 1 {
 		if capacity, err := strconv.ParseFloat(matches[1], 64); err == nil {
 			spec.Capacity = capacity
 		}
 	}
 
-	// Extract power
-	powerRe := regexp.MustCompile(`(?i)power:\s*([0-9.]+)\s*kW`)
+	// Extract power using pre-compiled regex
 	if matches := powerRe.FindStringSubmatch(text); len(matches) > 1 {
 		if power, err := strconv.ParseFloat(matches[1], 64); err == nil {
 			spec.Power = power
 		}
 	}
 
-	// Extract chemistry
-	chemistryRe := regexp.MustCompile(`(?i)chemistry:\s*([^\n]+)`)
+	// Extract chemistry using pre-compiled regex and trim whitespace
 	if matches := chemistryRe.FindStringSubmatch(text); len(matches) > 1 {
-		spec.Chemistry = matches[1]
+		spec.Chemistry = strings.TrimSpace(matches[1])
 	}
 
 	// Validate that we got at least some data
