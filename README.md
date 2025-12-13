@@ -1,207 +1,175 @@
-# ⚡ EV Oracle
+# EV Oracle
 
-> Ask about any EV battery, get instant answers.
+A Go-powered CLI tool for retrieving electric vehicle battery specifications (capacity, power, chemistry) by make/model/year. Features intelligent similarity search using Neon PostgreSQL with pgvector and OpenAI embeddings, with Claude API fallback for low-confidence results.
 
-A blazing-fast CLI tool that retrieves electric vehicle battery specifications using vector similarity search with intelligent LLM fallback.
+## Features
 
-## 🎯 Features
+- 🔍 **Vector Similarity Search**: Uses pgvector for semantic search of EV specifications
+- 🤖 **OpenAI Embeddings**: Converts queries to embeddings for accurate similarity matching
+- 🧠 **Claude Fallback**: Automatically falls back to Claude API when confidence < 0.8
+- 📊 **Multiple Output Formats**: Supports human-readable and JSON output
+- ⚡ **Fast & Efficient**: Built with Go for performance and reliability
 
-- **Vector-First Search**: Query a pgvector knowledge base for sub-second lookups
-- **Smart Fallback**: Claude AI fills gaps when the database doesn't have an answer
-- **Rich Battery Data**: Capacity (kWh), power nameplate (kW), chemistry, and more
-- **Multiple Output Formats**: Human-readable text, JSON, or YAML
-- **Confidence Scoring**: Transparent similarity scores show answer reliability
+## Architecture
 
-## 🚀 Quick Start
-```bash
-# Install
-go install github.com/scaryPonens/ev-oracle@latest
+The project follows a clean architecture pattern:
 
-# Query a vehicle
-ev-oracle tesla "model 3" 2023
-
-# Output:
-# Tesla Model 3 (2023)
-# Battery Capacity: 75 kWh
-# Power Nameplate: 208 kW
-# Chemistry: NMC (Nickel Manganese Cobalt)
-# Source: vector_db (confidence: 0.94)
+```
+ev-oracle/
+├── cmd/                    # CLI commands
+│   └── root.go            # Main query command
+├── internal/
+│   ├── db/                # Database layer (pgx/v5, pgvector)
+│   ├── embedding/         # OpenAI embeddings service
+│   ├── llm/              # Claude API integration
+│   └── models/           # Data models and configuration
+└── main.go               # Entry point
 ```
 
-## 📦 Installation
+## Prerequisites
+
+- Go 1.21 or later
+- PostgreSQL database with pgvector extension (Neon recommended)
+- OpenAI API key
+- Anthropic API key (for Claude)
+
+## Installation
 
 ### From Source
+
 ```bash
 git clone https://github.com/scaryPonens/ev-oracle.git
 cd ev-oracle
-go build -o ev-oracle
+go build -o ev-oracle .
 ```
 
-### Prerequisites
+### Using Go Install
 
-- Go 1.21+
-- Neon PostgreSQL database with pgvector extension
-- OpenAI API key (for embeddings)
-- Anthropic API key (for LLM fallback)
-
-## ⚙️ Configuration
-
-Set environment variables:
 ```bash
-export NEON_DATABASE_URL="postgresql://user:pass@host/dbname"
-export OPENAI_API_KEY="sk-..."
-export ANTHROPIC_API_KEY="sk-ant-..."
+go install github.com/scaryPonens/ev-oracle@latest
 ```
 
-Or create `.env` file:
-```env
-NEON_DATABASE_URL=postgresql://user:pass@host/dbname
+## Configuration
+
+The application uses environment variables for configuration:
+
+| Variable | Description | Required |
+|----------|-------------|----------|
+| `NEON_DATABASE_URL` | PostgreSQL connection string (with pgvector) | Yes |
+| `OPENAI_API_KEY` | OpenAI API key for embeddings | Yes |
+| `ANTHROPIC_API_KEY` | Anthropic API key for Claude fallback | Yes |
+
+### Example .env file
+
+```bash
+NEON_DATABASE_URL=postgresql://user:password@host/database?sslmode=require
 OPENAI_API_KEY=sk-...
 ANTHROPIC_API_KEY=sk-ant-...
-CONFIDENCE_THRESHOLD=0.8
 ```
 
-## 🎮 Usage
+Load environment variables:
+
+```bash
+export $(cat .env | xargs)
+```
+
+## Database Setup
+
+The application will automatically create the necessary schema on first use. However, you need to ensure the pgvector extension is available:
+
+```sql
+CREATE EXTENSION IF NOT EXISTS vector;
+```
+
+For Neon databases, pgvector is typically pre-installed.
+
+## Usage
 
 ### Basic Query
+
 ```bash
-ev-oracle <make> <model> <year>
+ev-oracle Tesla "Model 3" 2023
 ```
 
-### With Flags
+Output:
+```
+Make:       Tesla
+Model:      Model 3
+Year:       2023
+Capacity:   75.0 kWh
+Power:      283.0 kW
+Chemistry:  NMC (Nickel Manganese Cobalt)
+Confidence: 1.00
+Source:     database
+```
+
+### JSON Output
+
 ```bash
-# JSON output
-ev-oracle nissan leaf 2022 --json
-
-# Custom confidence threshold
-ev-oracle ford "f-150 lightning" 2023 --threshold 0.85
-
-# Verbose mode (show embedding/query details)
-ev-oracle rivian r1t 2024 --verbose
+ev-oracle --json Nissan Leaf 2022
 ```
 
-## 🏗️ How It Works
-```
-User Input → Generate Embedding → Vector Search (Neon/pgvector)
-                                          ↓
-                                   Confidence > 0.8?
-                                    ↙           ↘
-                              Return Result    Claude API
-                                                    ↓
-                                              Parse Response
-                                                    ↓
-                                              Cache to Vector DB
-```
-
-1. **Embedding Generation**: Input text converted to 1536-dim vector via OpenAI
-2. **Similarity Search**: Cosine similarity query against pgvector index
-3. **Confidence Check**: Results above threshold returned immediately
-4. **LLM Fallback**: Claude analyzes the query and returns structured battery data
-5. **Caching**: LLM responses stored in vector DB for future queries
-
-## 🗄️ Database Schema
-```sql
-CREATE TABLE ev_specs (
-    id SERIAL PRIMARY KEY,
-    make TEXT NOT NULL,
-    model TEXT NOT NULL,
-    year INTEGER NOT NULL,
-    battery_capacity_kwh DECIMAL,
-    power_nameplate_kw DECIMAL,
-    chemistry TEXT,
-    metadata JSONB,
-    embedding vector(1536),
-    created_at TIMESTAMPTZ DEFAULT NOW()
-);
-
-CREATE INDEX ON ev_specs USING hnsw (embedding vector_cosine_ops);
-```
-
-## 🧪 Example Output
-
-### Text Format (Default)
-```
-Chevrolet Bolt EV (2022)
-━━━━━━━━━━━━━━━━━━━━━━━━━━
-Battery Capacity:     65 kWh
-Power Nameplate:      150 kW
-Chemistry:            NMC
-Range (EPA):          259 miles
-Source:               vector_db
-Confidence:           0.92
-```
-
-### JSON Format
+Output:
 ```json
 {
-  "make": "Chevrolet",
-  "model": "Bolt EV",
+  "make": "Nissan",
+  "model": "Leaf",
   "year": 2022,
-  "battery": {
-    "capacity_kwh": 65,
-    "power_nameplate_kw": 150,
-    "chemistry": "NMC",
-    "range_miles": 259
-  },
-  "source": "vector_db",
-  "confidence": 0.92
+  "capacity_kwh": 40.0,
+  "power_kw": 110.0,
+  "chemistry": "Li-ion",
+  "confidence": 0.95,
+  "source": "database"
 }
 ```
 
-## 🛠️ Development
+### Help
+
+```bash
+ev-oracle --help
+```
+
+## How It Works
+
+1. **Exact Match**: First tries to find an exact match in the database by make/model/year
+2. **Similarity Search**: If no exact match, converts the query to an embedding and performs vector similarity search
+3. **Confidence Check**: If the best match has confidence ≥ 0.8, returns it
+4. **LLM Fallback**: If confidence < 0.8, queries Claude API for the information
+5. **Output**: Returns the result in the requested format (text or JSON)
+
+## Development
 
 ### Project Structure
-```
-ev-oracle/
-├── cmd/
-│   └── root.go              # Cobra CLI setup
-├── internal/
-│   ├── db/
-│   │   └── postgres.go      # Neon connection & queries
-│   ├── embedding/
-│   │   └── openai.go        # Embedding generation
-│   ├── llm/
-│   │   └── claude.go        # LLM fallback logic
-│   └── models/
-│       └── vehicle.go       # Data structures
-├── go.mod
-├── go.sum
-└── README.md
+
+- **cmd/root.go**: Main CLI command implementation
+- **internal/db/**: Database operations using pgx/v5 and pgvector
+- **internal/embedding/**: OpenAI embeddings integration
+- **internal/llm/**: Claude API integration for fallback queries
+- **internal/models/**: Data models and configuration using functional options pattern
+
+### Building
+
+```bash
+go build -o ev-oracle .
 ```
 
-### Run Tests
+### Running Tests
+
 ```bash
 go test ./...
 ```
 
-### Build
-```bash
-go build -o ev-oracle
-```
+## Contributing
 
-## 🌟 Roadmap
+Contributions are welcome! Please feel free to submit a Pull Request.
 
-- [ ] Hybrid search (vector + keyword filters)
-- [ ] Batch lookup from CSV
-- [ ] Web API mode
-- [ ] Support for plug-in hybrid vehicles
-- [ ] Historical battery degradation data
-- [ ] Export to multiple formats (CSV, XML)
+## License
 
-## 🤝 Contributing
+See [LICENSE](LICENSE) file for details.
 
-Contributions welcome! Please open an issue or PR.
+## Acknowledgments
 
-## 📄 License
-
-MIT License - see [LICENSE](LICENSE) for details
-
-## 🔗 Related Projects
-
-- [bidirectional.energy](https://bidirectional.energy) - Vehicle-to-grid platform
-- [pgvector](https://github.com/pgvector/pgvector) - Vector similarity search for Postgres
-- [Neon](https://neon.tech) - Serverless Postgres
-
----
-
-Built with ⚡ by [@scaryPonens](https://github.com/scaryPonens)
+- Built with [Cobra](https://github.com/spf13/cobra) for CLI
+- Uses [pgx](https://github.com/jackc/pgx) for PostgreSQL connectivity
+- Powered by [OpenAI](https://openai.com) embeddings
+- Falls back to [Anthropic Claude](https://www.anthropic.com) for intelligent responses
