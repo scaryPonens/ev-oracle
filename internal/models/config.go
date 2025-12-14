@@ -13,8 +13,10 @@ type Config struct {
 	OpenAIAPIKey      string
 	AnthropicAPIKey   string
 	EmbeddingProvider string // "openai" or "ollama"
+	LLMProvider       string // "claude" or "ollama"
 	OllamaURL         string // Ollama API URL (default: http://localhost:11434)
 	OllamaModel       string // Ollama embedding model (default: nomic-embed-text)
+	OllamaLLMModel    string // Ollama LLM model (default: llama3.2)
 }
 
 // ConfigOption is a functional option for Config
@@ -40,11 +42,17 @@ func NewConfig(opts ...ConfigOption) (*Config, error) {
 	if cfg.EmbeddingProvider == "" {
 		cfg.EmbeddingProvider = "openai" // Default to OpenAI
 	}
+	if cfg.LLMProvider == "" {
+		cfg.LLMProvider = "ollama" // Default to Ollama
+	}
 	if cfg.OllamaURL == "" {
 		cfg.OllamaURL = "http://localhost:11434"
 	}
 	if cfg.OllamaModel == "" {
 		cfg.OllamaModel = "nomic-embed-text"
+	}
+	if cfg.OllamaLLMModel == "" {
+		cfg.OllamaLLMModel = "gemma3"
 	}
 
 	// Validate required fields
@@ -54,8 +62,8 @@ func NewConfig(opts ...ConfigOption) (*Config, error) {
 	if cfg.EmbeddingProvider == "openai" && cfg.OpenAIAPIKey == "" {
 		return nil, fmt.Errorf("OPENAI_API_KEY is required when using OpenAI embeddings")
 	}
-	if cfg.AnthropicAPIKey == "" {
-		return nil, fmt.Errorf("ANTHROPIC_API_KEY is required")
+	if cfg.LLMProvider == "claude" && cfg.AnthropicAPIKey == "" {
+		return nil, fmt.Errorf("ANTHROPIC_API_KEY is required when using Claude LLM")
 	}
 
 	return cfg, nil
@@ -72,8 +80,10 @@ func WithEnvDefaults() ConfigOption {
 		cfg.OpenAIAPIKey = os.Getenv("OPENAI_API_KEY")
 		cfg.AnthropicAPIKey = os.Getenv("ANTHROPIC_API_KEY")
 		cfg.EmbeddingProvider = os.Getenv("EMBEDDING_PROVIDER")
+		cfg.LLMProvider = os.Getenv("LLM_PROVIDER")
 		cfg.OllamaURL = os.Getenv("OLLAMA_URL")
 		cfg.OllamaModel = os.Getenv("OLLAMA_MODEL")
+		cfg.OllamaLLMModel = os.Getenv("OLLAMA_LLM_MODEL")
 		return nil
 	}
 }

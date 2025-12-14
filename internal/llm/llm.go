@@ -18,6 +18,14 @@ const (
 	claudeModel     = "claude-3-5-sonnet-20241022"
 )
 
+// ProviderType represents the LLM provider
+type ProviderType string
+
+const (
+	ProviderClaude ProviderType = "claude"
+	ProviderOllama ProviderType = "ollama"
+)
+
 // Compile regular expressions once at package initialization
 var (
 	capacityRe  = regexp.MustCompile(`(?i)capacity:\s*([0-9.]+)\s*kWh`)
@@ -27,15 +35,30 @@ var (
 
 // Service handles LLM operations for fallback queries
 type Service struct {
-	apiKey string
-	client *http.Client
+	provider     ProviderType
+	anthropicKey string
+	ollamaURL    string
+	ollamaModel  string
+	client       *http.Client
 }
 
-// New creates a new LLM service
+// New creates a new LLM service with Claude (legacy)
 func New(apiKey string) *Service {
 	return &Service{
-		apiKey: apiKey,
-		client: &http.Client{},
+		provider:     ProviderClaude,
+		anthropicKey: apiKey,
+		client:       &http.Client{},
+	}
+}
+
+// NewWithProvider creates a new LLM service with the specified provider
+func NewWithProvider(provider ProviderType, anthropicKey, ollamaURL, ollamaModel string) *Service {
+	return &Service{
+		provider:     provider,
+		anthropicKey: anthropicKey,
+		ollamaURL:    ollamaURL,
+		ollamaModel:  ollamaModel,
+		client:       &http.Client{},
 	}
 }
 
@@ -59,8 +82,20 @@ type claudeResponse struct {
 	} `json:"content"`
 }
 
-// QueryEVSpecs queries Claude API for EV battery specifications
+// QueryEVSpecs queries the LLM API for EV battery specifications
 func (s *Service) QueryEVSpecs(make, model string, year int) (*models.EVSpec, error) {
+	switch s.provider {
+	case ProviderOllama:
+		return s.queryOllama(make, model, year)
+	case ProviderClaude:
+		fallthrough
+	default:
+		return s.queryClaude(make, model, year)
+	}
+}
+
+// queryClaude queries Claude API for EV battery specifications
+func (s *Service) queryClaude(make, model string, year int) (*models.EVSpec, error) {
 	prompt := fmt.Sprintf(`Please provide the battery specifications for the %d %s %s electric vehicle.
 
 Return ONLY the following information in this exact format:
@@ -92,7 +127,7 @@ If you don't have exact information, provide your best estimate based on similar
 	}
 
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("x-api-key", s.apiKey)
+	req.Header.Set("x-api-key", s.anthropicKey)
 	req.Header.Set("anthropic-version", "2023-06-01")
 
 	resp, err := s.client.Do(req)
@@ -103,7 +138,7 @@ If you don't have exact information, provide your best estimate based on similar
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("Claude API error (status %d): %s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("claude API error (status %d): %s", resp.StatusCode, string(body))
 	}
 
 	var claudeResp claudeResponse
@@ -117,6 +152,79 @@ If you don't have exact information, provide your best estimate based on similar
 
 	// Parse the response text
 	spec, err := parseEVSpecs(claudeResp.Content[0].Text, make, model, year)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse response: %w", err)
+	}
+
+	return spec, nil
+}
+
+// ollamaRequest represents the request to Ollama API
+type ollamaRequest struct {
+	Model  string `json:"model"`
+	Prompt string `json:"prompt"`
+	Stream bool   `json:"stream"`
+}
+
+// ollamaResponse represents the response from Ollama API
+type ollamaResponse struct {
+	Response string `json:"response"`
+}
+
+// queryOllama queries Ollama API for EV battery specifications
+func (s *Service) queryOllama(make, model string, year int) (*models.EVSpec, error) {
+	fmt.Println("Querying Ollama for", year, make, model)
+	prompt := fmt.Sprintf(`Please provide the DC fast charging capabilities of the %d %s %s. 
+Where "Power" is the peak rate at which the vehicle can DC fast charge.  
+
+Return ONLY the following information in this exact format: 
+Capacity: [number] 
+kWh Power: [number] kW 
+Chemistry: [chemistry type]
+
+If you don't have exact information, provide your best estimate based on similar models.`, year, make, model)
+
+	reqBody := ollamaRequest{
+		Model:  s.ollamaModel,
+		Prompt: prompt,
+		Stream: false,
+	}
+
+	jsonData, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	url := fmt.Sprintf("%s/api/generate", s.ollamaURL)
+	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonData))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("ollama API error (status %d): %s", resp.StatusCode, string(body))
+	}
+
+	var ollamaResp ollamaResponse
+	if err := json.NewDecoder(resp.Body).Decode(&ollamaResp); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	if ollamaResp.Response == "" {
+		return nil, fmt.Errorf("no response from ollama")
+	}
+	fmt.Println("Ollama response:", ollamaResp.Response)
+	// Parse the response text
+	spec, err := parseEVSpecs(ollamaResp.Response, make, model, year)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse response: %w", err)
 	}

@@ -8,4 +8,4 @@ const ConfidenceThreshold = 0.8
 const LLMConfidenceScore = 0.5
 
 // EmbeddingDimension is the dimension of the OpenAI text-embedding-3-small model
-const EmbeddingDimension = 1536
+const EmbeddingDimension = 768

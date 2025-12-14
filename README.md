@@ -62,10 +62,12 @@ The application uses environment variables for configuration:
 |----------|-------------|----------|
 | `NEON_DATABASE_URL` | PostgreSQL connection string (with pgvector) | Yes |
 | `EMBEDDING_PROVIDER` | Embedding provider: `openai` or `ollama` (default: `openai`) | No |
+| `LLM_PROVIDER` | LLM provider: `claude` or `ollama` (default: `ollama`) | No |
 | `OPENAI_API_KEY` | OpenAI API key for embeddings (required if using OpenAI) | Conditional |
+| `ANTHROPIC_API_KEY` | Anthropic API key for Claude (required if using Claude) | Conditional |
 | `OLLAMA_URL` | Ollama API URL (default: `http://localhost:11434`) | No |
 | `OLLAMA_MODEL` | Ollama embedding model (default: `nomic-embed-text`) | No |
-| `ANTHROPIC_API_KEY` | Anthropic API key for Claude fallback | Yes |
+| `OLLAMA_LLM_MODEL` | Ollama LLM model (default: `llama3.2`) | No |
 
 ### Example .env file
 
@@ -77,10 +79,22 @@ OPENAI_API_KEY=sk-...
 ANTHROPIC_API_KEY=sk-ant-...
 ```
 
-**Using Ollama:**
+**Using Ollama (default for LLM):**
 ```bash
 NEON_DATABASE_URL=postgresql://user:password@host/database?sslmode=require
 EMBEDDING_PROVIDER=ollama
+LLM_PROVIDER=ollama
+OLLAMA_URL=http://localhost:11434
+OLLAMA_MODEL=nomic-embed-text
+OLLAMA_LLM_MODEL=llama3.2
+# ANTHROPIC_API_KEY not needed when using Ollama
+```
+
+**Using Claude for LLM:**
+```bash
+NEON_DATABASE_URL=postgresql://user:password@host/database?sslmode=require
+EMBEDDING_PROVIDER=ollama
+LLM_PROVIDER=claude
 OLLAMA_URL=http://localhost:11434
 OLLAMA_MODEL=nomic-embed-text
 ANTHROPIC_API_KEY=sk-ant-...
@@ -90,15 +104,16 @@ The application automatically loads the `.env` file if it exists. You don't need
 
 **Note:** The `.env` file is gitignored by default to keep your secrets safe.
 
-### Using Ollama for Embeddings
+### Using Ollama
 
-To use Ollama instead of OpenAI for embeddings:
+Ollama is now the **default LLM provider** and can also be used for embeddings. To use Ollama:
 
 1. **Install Ollama**: Download from [ollama.com](https://ollama.com)
 
-2. **Pull an embedding model**:
+2. **Pull required models**:
    ```bash
-   ollama pull nomic-embed-text
+   ollama pull nomic-embed-text  # For embeddings
+   ollama pull llama3.2          # For LLM (or any other model you prefer)
    ```
 
 3. **Start Ollama** (if not running as a service):
@@ -106,11 +121,13 @@ To use Ollama instead of OpenAI for embeddings:
    ollama serve
    ```
 
-4. **Configure your `.env` file**:
+4. **Configure your `.env` file`** (Ollama is the default for LLM):
    ```bash
    EMBEDDING_PROVIDER=ollama
+   LLM_PROVIDER=ollama  # This is the default, can be omitted
    OLLAMA_URL=http://localhost:11434
    OLLAMA_MODEL=nomic-embed-text
+   OLLAMA_LLM_MODEL=llama3.2
    ```
 
 **Important Note:** The default database schema expects 1536-dimensional vectors (OpenAI's `text-embedding-3-small`). Ollama's `nomic-embed-text` produces 768-dimensional vectors. If you want to use Ollama, you'll need to:

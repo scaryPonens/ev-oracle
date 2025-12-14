@@ -46,6 +46,7 @@ func init() {
 
 // runQuery executes the main query logic
 func runQuery(cmd *cobra.Command, args []string) error {
+	fmt.Printf("Running query for %s %s %s\n", args[0], args[1], args[2])
 	make := args[0]
 	model := args[1]
 	yearStr := args[2]
@@ -107,8 +108,14 @@ func runQuery(cmd *cobra.Command, args []string) error {
 		return outputSpec(&results[0])
 	}
 
+	fmt.Println("Falling back to LLM")
 	// Fall back to LLM
-	llmSvc := llm.New(cfg.AnthropicAPIKey)
+	llmSvc := llm.NewWithProvider(
+		llm.ProviderType(cfg.LLMProvider),
+		cfg.AnthropicAPIKey,
+		cfg.OllamaURL,
+		cfg.OllamaLLMModel,
+	)
 	spec, err = llmSvc.QueryEVSpecs(make, model, year)
 	if err != nil {
 		return fmt.Errorf("LLM query error: %w", err)
